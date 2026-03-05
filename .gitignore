@@ -1,0 +1,10 @@
+# 本地参考仓库：不纳入当前项目版本控制
+/activitywatch-mcp-server/
+*.log
+*.csv
+# Python 运行缓存：避免把本地解释器产物带进仓库
+__pycache__/
+*.pyc
+
+# macOS Finder 生成文件：与项目逻辑无关
+.DS_Store

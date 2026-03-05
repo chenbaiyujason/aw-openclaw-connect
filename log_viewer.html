@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ActivityWatch 日志查看器</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --panel: #161b22;
+      --panel-2: #1f2630;
+      --text: #e6edf3;
+      --muted: #9aa4b2;
+      --border: #30363d;
+      --accent: #58a6ff;
+      --window: #7ee787;
+      --web: #d2a8ff;
+      --vscode: #79c0ff;
+      --afk: #ffa657;
+      --danger: #ff7b72;
+      --shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #0d1117 0%, #111827 100%);
+      color: var(--text);
+    }
+
+    .page {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .hero,
+    .panel {
+      background: rgba(22, 27, 34, 0.92);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+
+    .hero {
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+
+    .hero h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+
+    .hero p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .panel {
+      padding: 18px;
+      margin-bottom: 18px;
+    }
+
+    .uploader {
+      display: grid;
+      gap: 12px;
+    }
+
+    .dropzone {
+      border: 1px dashed var(--accent);
+      border-radius: 16px;
+      padding: 24px;
+      text-align: center;
+      background: rgba(88, 166, 255, 0.06);
+      transition: 0.2s ease;
+    }
+
+    .dropzone.dragover {
+      background: rgba(88, 166, 255, 0.12);
+      transform: translateY(-1px);
+    }
+
+    .dropzone strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 16px;
+    }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .field {
+      display: grid;
+      gap: 6px;
+    }
+
+    .field label {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .field input,
+    .field select {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+    }
+
+    .summary-grid,
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .stat-card {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 14px;
+    }
+
+    .stat-card .label {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+
+    .stat-card .value {
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    .stat-card .sub {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 6px;
+      line-height: 1.5;
+    }
+
+    .columns {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 18px;
+    }
+
+    .section-title {
+      margin: 0 0 14px;
+      font-size: 18px;
+    }
+
+    .badge-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      border: 1px solid var(--border);
+      background: #10161d;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 12px;
+      max-height: 70vh;
+      overflow: auto;
+      padding-right: 4px;
+    }
+
+    .timeline-card {
+      border: 1px solid var(--border);
+      border-left: 5px solid var(--accent);
+      border-radius: 16px;
+      background: var(--panel-2);
+      padding: 14px;
+    }
+
+    .timeline-card.window {
+      border-left-color: var(--window);
+    }
+
+    .timeline-card.web {
+      border-left-color: var(--web);
+    }
+
+    .timeline-card.vscode {
+      border-left-color: var(--vscode);
+    }
+
+    .timeline-card.afk {
+      border-left-color: var(--afk);
+    }
+
+    .timeline-card .topline {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+      align-items: center;
+    }
+
+    .timeline-card .title {
+      font-weight: 700;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+
+    .timeline-card .meta,
+    .timeline-card .detail {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+      word-break: break-word;
+    }
+
+    .detail {
+      margin-top: 8px;
+    }
+
+    .empty {
+      border: 1px dashed var(--border);
+      border-radius: 16px;
+      padding: 20px;
+      color: var(--muted);
+      text-align: center;
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .list-table {
+      display: grid;
+      gap: 10px;
+    }
+
+    .table-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: center;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+      background: var(--panel-2);
+    }
+
+    .table-row .name {
+      font-weight: 600;
+      word-break: break-word;
+    }
+
+    .table-row .hint {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 4px;
+    }
+
+    .warning {
+      color: var(--danger);
+      font-size: 13px;
+      margin-top: 10px;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    @media (max-width: 1100px) {
+      .toolbar,
+      .summary-grid,
+      .stats-grid,
+      .columns {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <section class="hero">
+      <h1>ActivityWatch 清洗日志查看器</h1>
+      <p>
+        选择 `logs/` 目录下导出的 `.log` 文件，页面会自动分析设备、活跃时间、清洗后的事件时间线，
+        帮你检查 AFK 过滤后留下的事件是否符合预期。
+      </p>
+    </section>
+
+    <section class="panel uploader">
+      <div id="dropzone" class="dropzone">
+        <strong>拖拽日志文件到这里，或点击下方按钮选择文件</strong>
+        <span>支持 `activitywatch-cleaned-last4h-*.log` 这类 JSON 日志</span>
+      </div>
+      <input id="fileInput" type="file" accept=".log,.json,application/json" />
+      <div id="loadStatus" class="meta"></div>
+
+      <div class="toolbar">
+        <div class="field">
+          <label for="deviceFilter">设备过滤</label>
+          <select id="deviceFilter">
+            <option value="">全部设备</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="watcherFilter">Watcher 过滤</label>
+          <select id="watcherFilter">
+            <option value="">全部 watcher</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="searchInput">搜索应用/标题/URL</label>
+          <input id="searchInput" type="text" placeholder="例如 Cursor / github / 微信" />
+        </div>
+        <div class="field">
+          <label for="sortMode">时间线排序</label>
+          <select id="sortMode">
+            <option value="asc">从早到晚</option>
+            <option value="desc">从晚到早</option>
+            <option value="duration">按时长从长到短</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <section id="overviewPanel" class="panel hidden">
+      <h2 class="section-title">整体概览</h2>
+      <div id="summaryGrid" class="summary-grid"></div>
+      <div id="warningBox" class="warning hidden"></div>
+    </section>
+
+    <section id="statsPanel" class="panel hidden">
+      <h2 class="section-title">按维度汇总</h2>
+      <div class="stats-grid">
+        <div>
+          <h3 class="section-title">设备</h3>
+          <div id="deviceStats" class="list-table"></div>
+        </div>
+        <div>
+          <h3 class="section-title">Watcher</h3>
+          <div id="watcherStats" class="list-table"></div>
+        </div>
+        <div>
+          <h3 class="section-title">应用 / 网站</h3>
+          <div id="subjectStats" class="list-table"></div>
+        </div>
+        <div>
+          <h3 class="section-title">活跃设备组合</h3>
+          <div id="activeComboStats" class="list-table"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="timelinePanel" class="columns hidden">
+      <div class="panel">
+        <h2 class="section-title">清洗后的事件时间线</h2>
+        <div id="timelineList" class="timeline"></div>
+      </div>
+      <div>
+        <div class="panel">
+          <h2 class="section-title">用户有效时间片</h2>
+          <div id="effectiveList" class="timeline"></div>
+        </div>
+        <div class="panel">
+          <h2 class="section-title">日志信息</h2>
+          <div id="metaBadges" class="badge-list"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const state = {
+      logData: null,
+      filteredEvents: [],
+      fileName: "",
+    };
+
+    const elements = {
+      dropzone: document.getElementById("dropzone"),
+      fileInput: document.getElementById("fileInput"),
+      loadStatus: document.getElementById("loadStatus"),
+      deviceFilter: document.getElementById("deviceFilter"),
+      watcherFilter: document.getElementById("watcherFilter"),
+      searchInput: document.getElementById("searchInput"),
+      sortMode: document.getElementById("sortMode"),
+      overviewPanel: document.getElementById("overviewPanel"),
+      statsPanel: document.getElementById("statsPanel"),
+      timelinePanel: document.getElementById("timelinePanel"),
+      summaryGrid: document.getElementById("summaryGrid"),
+      deviceStats: document.getElementById("deviceStats"),
+      watcherStats: document.getElementById("watcherStats"),
+      subjectStats: document.getElementById("subjectStats"),
+      activeComboStats: document.getElementById("activeComboStats"),
+      timelineList: document.getElementById("timelineList"),
+      effectiveList: document.getElementById("effectiveList"),
+      metaBadges: document.getElementById("metaBadges"),
+      warningBox: document.getElementById("warningBox"),
+    };
+
+    // 统一格式化秒数，方便在统计卡片和时间线中复用。
+    function formatDuration(totalSeconds) {
+      const safeSeconds = Math.max(0, Math.round(Number(totalSeconds) || 0));
+      const hours = Math.floor(safeSeconds / 3600);
+      const minutes = Math.floor((safeSeconds % 3600) / 60);
+      const seconds = safeSeconds % 60;
+      if (hours > 0) {
+        return `${hours}h ${minutes}m ${seconds}s`;
+      }
+      if (minutes > 0) {
+        return `${minutes}m ${seconds}s`;
+      }
+      return `${seconds}s`;
+    }
+
+    // 统一把时间显示成本地时区，便于人工核对真实时间线。
+    function formatDateTime(isoString) {
+      const dateValue = new Date(isoString);
+      return new Intl.DateTimeFormat("zh-CN", {
+        hour12: false,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      }).format(dateValue);
+    }
+
+    // 根据事件类型提取最适合人工阅读的主体文本。
+    function getEventSubject(eventItem) {
+      if (!eventItem || !eventItem.data) {
+        return "未知事件";
+      }
+      if (eventItem.watcher_family === "window") {
+        return [eventItem.data.app, eventItem.data.title].filter(Boolean).join(" · ") || "窗口事件";
+      }
+      if (eventItem.watcher_family === "web") {
+        return eventItem.data.title || eventItem.data.url || "网页事件";
+      }
+      if (eventItem.watcher_family === "vscode") {
+        return [eventItem.data.eventName, eventItem.data.project, eventItem.data.file].filter(Boolean).join(" · ") || "VSCode 事件";
+      }
+      return JSON.stringify(eventItem.data);
+    }
+
+    // 按 watcher 类型生成详情文本，便于快速看出过滤后的上下文。
+    function getEventDetail(eventItem) {
+      if (!eventItem || !eventItem.data) {
+        return "";
+      }
+      if (eventItem.watcher_family === "window") {
+        return `应用: ${eventItem.data.app || "未知"} | 标题: ${eventItem.data.title || "空"}`;
+      }
+      if (eventItem.watcher_family === "web") {
+        return `标题: ${eventItem.data.title || "空"} | URL: ${eventItem.data.url || "空"}`;
+      }
+      if (eventItem.watcher_family === "vscode") {
+        return `事件: ${eventItem.data.eventName || "未知"} | 项目: ${eventItem.data.project || "空"} | 文件: ${eventItem.data.file || "空"}`;
+      }
+      return Object.entries(eventItem.data)
+        .slice(0, 4)
+        .map(([keyName, valueText]) => `${keyName}: ${String(valueText)}`)
+        .join(" | ");
+    }
+
+    // 计算事件时长，保证页面在字段缺失时也能稳定展示。
+    function getDurationSeconds(startValue, endValue) {
+      return Math.max(0, (new Date(endValue).getTime() - new Date(startValue).getTime()) / 1000);
+    }
+
+    // 读入日志文件并触发全量渲染。
+    async function handleFile(fileObject) {
+      const fileText = await fileObject.text();
+      let parsedData = null;
+
+      try {
+        parsedData = JSON.parse(fileText);
+      } catch (error) {
+        elements.loadStatus.textContent = `文件解析失败: ${error instanceof Error ? error.message : "未知错误"}`;
+        return;
+      }
+
+      state.logData = parsedData;
+      state.fileName = fileObject.name;
+      elements.loadStatus.textContent = `已加载: ${fileObject.name}`;
+      hydrateFilterOptions(parsedData);
+      renderAll();
+    }
+
+    // 生成设备和 watcher 下拉框，确保与当前日志内容动态同步。
+    function hydrateFilterOptions(logData) {
+      const deviceNames = Object.keys(logData.buckets_by_device || {}).sort();
+      const watcherNames = Array.from(new Set((logData.cleaned_events || []).map((eventItem) => eventItem.watcher_family))).sort();
+
+      elements.deviceFilter.innerHTML = `<option value="">全部设备</option>${deviceNames
+        .map((deviceName) => `<option value="${escapeHtml(deviceName)}">${escapeHtml(deviceName)}</option>`)
+        .join("")}`;
+
+      elements.watcherFilter.innerHTML = `<option value="">全部 watcher</option>${watcherNames
+        .map((watcherName) => `<option value="${escapeHtml(watcherName)}">${escapeHtml(watcherName)}</option>`)
+        .join("")}`;
+    }
+
+    // 综合当前筛选条件，产出需要展示的事件集合。
+    function getFilteredEvents() {
+      if (!state.logData) {
+        return [];
+      }
+
+      const selectedDevice = elements.deviceFilter.value;
+      const selectedWatcher = elements.watcherFilter.value;
+      const searchText = elements.searchInput.value.trim().toLowerCase();
+      const sortMode = elements.sortMode.value;
+
+      const filteredEvents = (state.logData.cleaned_events || []).filter((eventItem) => {
+        if (selectedDevice && eventItem.source_device !== selectedDevice) {
+          return false;
+        }
+        if (selectedWatcher && eventItem.watcher_family !== selectedWatcher) {
+          return false;
+        }
+        if (!searchText) {
+          return true;
+        }
+        const haystack = [
+          eventItem.source_device,
+          eventItem.watcher_family,
+          eventItem.data?.app,
+          eventItem.data?.title,
+          eventItem.data?.url,
+          eventItem.data?.project,
+          eventItem.data?.file,
+          eventItem.data?.eventName,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(searchText);
+      });
+
+      filteredEvents.sort((leftEvent, rightEvent) => {
+        if (sortMode === "duration") {
+          return getDurationSeconds(rightEvent.start, rightEvent.end) - getDurationSeconds(leftEvent.start, leftEvent.end);
+        }
+        if (sortMode === "desc") {
+          return new Date(rightEvent.start).getTime() - new Date(leftEvent.start).getTime();
+        }
+        return new Date(leftEvent.start).getTime() - new Date(rightEvent.start).getTime();
+      });
+
+      return filteredEvents;
+    }
+
+    // 统一渲染页面所有区域。
+    function renderAll() {
+      if (!state.logData) {
+        return;
+      }
+
+      state.filteredEvents = getFilteredEvents();
+
+      elements.overviewPanel.classList.remove("hidden");
+      elements.statsPanel.classList.remove("hidden");
+      elements.timelinePanel.classList.remove("hidden");
+
+      renderOverview();
+      renderStats();
+      renderTimeline();
+      renderEffectiveTimeline();
+      renderMeta();
+    }
+
+    // 渲染总览卡片，帮助先看出整体是否合理。
+    function renderOverview() {
+      const logData = state.logData;
+      const deviceCount = Object.keys(logData.buckets_by_device || {}).length;
+      const watcherCount = new Set(state.filteredEvents.map((eventItem) => eventItem.watcher_family)).size;
+      const eventCount = state.filteredEvents.length;
+      const totalEventSeconds = state.filteredEvents.reduce(
+        (totalSeconds, eventItem) => totalSeconds + getDurationSeconds(eventItem.start, eventItem.end),
+        0
+      );
+      const userEffectiveSeconds = (logData.user_effective_intervals || []).reduce(
+        (totalSeconds, sliceItem) => totalSeconds + getDurationSeconds(sliceItem.start, sliceItem.end),
+        0
+      );
+      const overlapEventCount = state.filteredEvents.filter((eventItem) => (eventItem.active_devices || []).length > 1).length;
+
+      elements.summaryGrid.innerHTML = [
+        summaryCard("时间范围", `${formatDateTime(logData.filters.start)} - ${formatDateTime(logData.filters.end)}`, state.fileName),
+        summaryCard("设备 / Watcher", `${deviceCount} / ${watcherCount}`, "筛选后参与展示的设备与 watcher"),
+        summaryCard("清洗后事件数", String(eventCount), `累计时长 ${formatDuration(totalEventSeconds)}`),
+        summaryCard("用户有效时长", formatDuration(userEffectiveSeconds), `跨设备事件 ${overlapEventCount} 条`),
+      ].join("");
+
+      const warningMessages = [];
+      if (eventCount === 0) {
+        warningMessages.push("当前筛选条件下没有事件，可能是过滤过严，或日志本身没有命中数据。");
+      }
+      if (userEffectiveSeconds === 0) {
+        warningMessages.push("用户有效时间为 0，说明 AFK 清洗后没有留下任何活跃时间片。");
+      }
+      if ((logData.user_effective_intervals || []).length === 0) {
+        warningMessages.push("日志中没有 `user_effective_intervals`，这通常说明上游导出逻辑异常。");
+      }
+
+      if (warningMessages.length > 0) {
+        elements.warningBox.classList.remove("hidden");
+        elements.warningBox.innerHTML = warningMessages.join("<br />");
+      } else {
+        elements.warningBox.classList.add("hidden");
+        elements.warningBox.textContent = "";
+      }
+    }
+
+    // 渲染统计区，帮你从“设备 / watcher / 应用”三个角度检查是否合理。
+    function renderStats() {
+      renderStatList(elements.deviceStats, aggregateBy(state.filteredEvents, (eventItem) => eventItem.source_device));
+      renderStatList(elements.watcherStats, aggregateBy(state.filteredEvents, (eventItem) => eventItem.watcher_family));
+      renderStatList(elements.subjectStats, aggregateBy(state.filteredEvents, (eventItem) => getEventSubject(eventItem)), 8);
+      renderStatList(
+        elements.activeComboStats,
+        aggregateBy(
+          state.filteredEvents,
+          (eventItem) => (eventItem.active_devices || []).join(" + ") || "无活跃设备标签"
+        ),
+        8
+      );
+    }
+
+    // 渲染事件时间线，让你按顺序核对过滤后的结果。
+    function renderTimeline() {
+      if (state.filteredEvents.length === 0) {
+        elements.timelineList.innerHTML = `<div class="empty">当前筛选条件下没有清洗后的事件。</div>`;
+        return;
+      }
+
+      elements.timelineList.innerHTML = state.filteredEvents
+        .map((eventItem) => {
+          const eventDuration = formatDuration(getDurationSeconds(eventItem.start, eventItem.end));
+          const activeDevices = (eventItem.active_devices || []).join(", ") || "无";
+          const sourceBuckets = (eventItem.source_buckets || []).map((bucketName) => escapeHtml(bucketName)).join("<br />");
+          return `
+            <article class="timeline-card ${escapeHtml(eventItem.watcher_family)}">
+              <div class="topline">
+                <div class="title">${escapeHtml(getEventSubject(eventItem))}</div>
+                <div class="badge">${escapeHtml(eventItem.watcher_family)}</div>
+              </div>
+              <div class="meta">
+                ${escapeHtml(formatDateTime(eventItem.start))} -> ${escapeHtml(formatDateTime(eventItem.end))}
+                | 时长 ${escapeHtml(eventDuration)}
+                | 设备 ${escapeHtml(eventItem.source_device)}
+              </div>
+              <div class="detail">${escapeHtml(getEventDetail(eventItem))}</div>
+              <div class="detail">活跃设备: ${escapeHtml(activeDevices)}</div>
+              <div class="detail">来源 bucket:<br />${sourceBuckets}</div>
+            </article>
+          `;
+        })
+        .join("");
+    }
+
+    // 渲染用户有效时间片，帮助核对 AFK 清洗边界是否符合预期。
+    function renderEffectiveTimeline() {
+      const selectedDevice = elements.deviceFilter.value;
+      const effectiveIntervals = (state.logData.user_effective_intervals || []).filter((sliceItem) => {
+        if (!selectedDevice) {
+          return true;
+        }
+        return (sliceItem.active_devices || []).includes(selectedDevice);
+      });
+      if (effectiveIntervals.length === 0) {
+        elements.effectiveList.innerHTML = `<div class="empty">日志中没有有效时间片。</div>`;
+        return;
+      }
+
+      elements.effectiveList.innerHTML = effectiveIntervals
+        .map((sliceItem) => {
+          const activeDevices = (sliceItem.active_devices || []).join(", ") || "无";
+          return `
+            <article class="timeline-card afk">
+              <div class="topline">
+                <div class="title">${escapeHtml(activeDevices)}</div>
+                <div class="badge">${escapeHtml(formatDuration(getDurationSeconds(sliceItem.start, sliceItem.end)))}</div>
+              </div>
+              <div class="meta">${escapeHtml(formatDateTime(sliceItem.start))} -> ${escapeHtml(formatDateTime(sliceItem.end))}</div>
+              <div class="detail">来源 bucket 数: ${(sliceItem.source_buckets || []).length}</div>
+            </article>
+          `;
+        })
+        .join("");
+    }
+
+    // 渲染日志元信息，方便快速确认文件来源与运行模式。
+    function renderMeta() {
+      const logData = state.logData;
+      const badges = [
+        `文件: ${state.fileName || "未命名"}`,
+        `AFK 清洗: ${String(logData.filters.apply_afk_cleanup)}`,
+        `设备数: ${Object.keys(logData.buckets_by_device || {}).length}`,
+        `有效时间片: ${(logData.user_effective_intervals || []).length}`,
+        `事件数: ${(logData.cleaned_events || []).length}`,
+      ];
+
+      elements.metaBadges.innerHTML = badges.map((itemText) => `<span class="badge">${escapeHtml(itemText)}</span>`).join("");
+    }
+
+    // 通用统计聚合器，用于汇总设备、watcher、应用等维度。
+    function aggregateBy(items, keyGetter) {
+      const statsMap = new Map();
+      items.forEach((item) => {
+        const statKey = keyGetter(item) || "未知";
+        const previousValue = statsMap.get(statKey) || { count: 0, seconds: 0 };
+        statsMap.set(statKey, {
+          count: previousValue.count + 1,
+          seconds: previousValue.seconds + getDurationSeconds(item.start, item.end),
+        });
+      });
+
+      return Array.from(statsMap.entries())
+        .map(([name, statValue]) => ({ name, ...statValue }))
+        .sort((leftItem, rightItem) => rightItem.seconds - leftItem.seconds);
+    }
+
+    // 渲染单列统计列表。
+    function renderStatList(targetElement, rows, limit = 6) {
+      const slicedRows = rows.slice(0, limit);
+      if (slicedRows.length === 0) {
+        targetElement.innerHTML = `<div class="empty">暂无数据</div>`;
+        return;
+      }
+
+      targetElement.innerHTML = slicedRows
+        .map(
+          (rowItem) => `
+            <div class="table-row">
+              <div>
+                <div class="name">${escapeHtml(rowItem.name)}</div>
+                <div class="hint">事件 ${rowItem.count} 条</div>
+              </div>
+              <div>${escapeHtml(formatDuration(rowItem.seconds))}</div>
+            </div>
+          `
+        )
+        .join("");
+    }
+
+    // 总览卡片模板。
+    function summaryCard(labelText, valueText, subText) {
+      return `
+        <div class="stat-card">
+          <div class="label">${escapeHtml(labelText)}</div>
+          <div class="value">${escapeHtml(valueText)}</div>
+          <div class="sub">${escapeHtml(subText)}</div>
+        </div>
+      `;
+    }
+
+    // 基础 HTML 转义，避免日志内容直接注入页面。
+    function escapeHtml(rawText) {
+      return String(rawText)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    // 绑定上传、拖拽和筛选事件。
+    function bindEvents() {
+      elements.fileInput.addEventListener("change", async (eventObject) => {
+        const fileObject = eventObject.target.files?.[0];
+        if (fileObject) {
+          await handleFile(fileObject);
+        }
+      });
+
+      elements.dropzone.addEventListener("dragover", (eventObject) => {
+        eventObject.preventDefault();
+        elements.dropzone.classList.add("dragover");
+      });
+
+      elements.dropzone.addEventListener("dragleave", () => {
+        elements.dropzone.classList.remove("dragover");
+      });
+
+      elements.dropzone.addEventListener("drop", async (eventObject) => {
+        eventObject.preventDefault();
+        elements.dropzone.classList.remove("dragover");
+        const fileObject = eventObject.dataTransfer?.files?.[0];
+        if (fileObject) {
+          await handleFile(fileObject);
+        }
+      });
+
+      [elements.deviceFilter, elements.watcherFilter, elements.searchInput, elements.sortMode].forEach((elementNode) => {
+        elementNode.addEventListener("input", renderAll);
+        elementNode.addEventListener("change", renderAll);
+      });
+    }
+
+    bindEvents();
+  </script>
+</body>
+</html>
