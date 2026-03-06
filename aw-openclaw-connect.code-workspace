@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../aw-watcher-cursor"
+		},
+		{
+			"path": "../openclaw-cursor"
+		}
+	],
+	"settings": {}
+}
