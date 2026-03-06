@@ -575,9 +575,15 @@ def _extract_subject_and_content(event: EventInterval) -> tuple[str, str]:
 
     if event.watcher_family == "vscode":
         activity_kind = _normalize_vscode_activity_kind(event.data.get("activityKind"))
-        base_subject = _pick_first_string(event.data, ("project", "language")) or "vscode"
-        subject_value = f"{base_subject} [{activity_kind}]"
-        content_value = _pick_first_string(event.data, ("file", "eventName", "title")) or base_subject
+        project_value = _pick_first_string(event.data, ("project",)) or "unknown"
+        subject_value = project_value
+        content_value = _format_vscode_item_content(
+            project_value=project_value,
+            activity_kind=activity_kind,
+            file_value=_pick_first_string(event.data, ("file",)),
+            event_name=_pick_first_string(event.data, ("eventName",)),
+            title_value=_pick_first_string(event.data, ("title",)),
+        )
         return subject_value, content_value
 
     subject_value = _pick_first_string(event.data, ("app", "project", "language", "eventName", "subject", "branch")) or event.watcher_family
@@ -587,8 +593,49 @@ def _extract_subject_and_content(event: EventInterval) -> tuple[str, str]:
 
 def _normalize_item_name(content_value: str) -> str:
     """把 window/vscode 的内容归一化为可比较的文件名。"""
-    primary_part = content_value.split(" — ", maxsplit=1)[0].strip()
+    primary_part = content_value.split(" [", maxsplit=1)[0].split(" — ", maxsplit=1)[0].strip()
     return Path(primary_part).name.strip().lower()
+
+
+def _format_vscode_item_content(
+    project_value: str,
+    activity_kind: str,
+    file_value: str | None,
+    event_name: str | None,
+    title_value: str | None,
+) -> str:
+    """渲染 vscode item，优先用相对项目路径，并把状态下沉到 item 级别。"""
+    if file_value is not None:
+        display_path = _render_vscode_file_path(
+            project_value=project_value,
+            file_value=file_value,
+        )
+        return f"{display_path} [{activity_kind}]"
+
+    fallback_content = event_name or title_value or project_value
+    return f"{fallback_content} [{activity_kind}]"
+
+
+def _render_vscode_file_path(project_value: str, file_value: str) -> str:
+    """已知项目根目录时输出相对路径；未知项目时保留绝对路径。"""
+    if not _can_render_relative_vscode_path(project_value):
+        return file_value
+
+    project_path = Path(project_value)
+    file_path = Path(file_value)
+    if not project_path.is_absolute() or not file_path.is_absolute():
+        return file_value
+
+    try:
+        return str(file_path.relative_to(project_path))
+    except ValueError:
+        return file_value
+
+
+def _can_render_relative_vscode_path(project_value: str) -> bool:
+    """只有项目根目录明确时，才把文件路径压成相对路径。"""
+    normalized_project = project_value.strip().lower()
+    return bool(normalized_project) and normalized_project not in {"unknown", "vscode"}
 
 
 def _is_editor_window_event(event: ExportEvent) -> bool:
