@@ -112,6 +112,7 @@ def build_event_signature(watcher_family: str, data: dict[str, object]) -> tuple
     if watcher_family == "web":
         return (data.get("url"), data.get("title"))
     if watcher_family == "vscode":
-        return (data.get("eventName"), data.get("project"), data.get("file"))
+        # vscode 单轨里需要把停留/编辑状态也纳入签名，避免清洗时把两者误判成同类事件。
+        return (data.get("eventName"), data.get("project"), data.get("file"), data.get("activityKind"))
 
     return tuple(sorted((key, repr(value)) for key, value in data.items()))

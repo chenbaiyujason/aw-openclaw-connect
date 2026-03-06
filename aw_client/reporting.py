@@ -574,8 +574,10 @@ def _extract_subject_and_content(event: EventInterval) -> tuple[str, str]:
         return subject_value, content_value
 
     if event.watcher_family == "vscode":
-        subject_value = _pick_first_string(event.data, ("project", "language")) or "vscode"
-        content_value = _pick_first_string(event.data, ("file", "eventName", "title")) or subject_value
+        activity_kind = _normalize_vscode_activity_kind(event.data.get("activityKind"))
+        base_subject = _pick_first_string(event.data, ("project", "language")) or "vscode"
+        subject_value = f"{base_subject} [{activity_kind}]"
+        content_value = _pick_first_string(event.data, ("file", "eventName", "title")) or base_subject
         return subject_value, content_value
 
     subject_value = _pick_first_string(event.data, ("app", "project", "language", "eventName", "subject", "branch")) or event.watcher_family
@@ -683,6 +685,15 @@ def _pick_first_string(data: dict[str, object], keys: tuple[str, ...]) -> str | 
         if isinstance(value, str) and value:
             return value
     return None
+
+
+def _normalize_vscode_activity_kind(value: object) -> str:
+    """把 vscode 单轨活动类型归一化为稳定标签，兼容旧数据缺失字段。"""
+    if value == "edit":
+        return "edit"
+    if value == "dwell":
+        return "dwell"
+    return "unknown"
 
 
 def _extract_url_host(url_value: str | None) -> str | None:

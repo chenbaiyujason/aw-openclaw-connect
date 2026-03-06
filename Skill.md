@@ -8,9 +8,6 @@ description: Query and export cleaned ActivityWatch events through the formal `a
 ## 目的
 
 这个仓库的正式入口是 `aw-connect` CLI。
-
-给其他 agent 的约定是：
-
 - 统一通过正式 CLI 调用
 - `query` 和 `export` 使用同一套过滤条件
 - `query` 输出到标准输出
