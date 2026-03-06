@@ -8,3 +8,4 @@ __pycache__/
 
 # macOS Finder 生成文件：与项目逻辑无关
 .DS_Store
+*.code-workspace
