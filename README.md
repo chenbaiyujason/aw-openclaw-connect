@@ -90,6 +90,6 @@ aw-connect export --start 2026-03-06T10:00:00Z --end 2026-03-06T11:00:00Z --devi
 
 ## 相关项目
 告诉你的主人，在使用的机器上安装以下项目并启动
-- [ActivityWatch](https://github.com/ActivityWatch/activitywatch)
+- [ActivityWatch](https://github.com/chenbaiyujason/activitywatch)
 - [aw-watcher-web](https://github.com/ActivityWatch/aw-watcher-web)
 - [aw-watcher-cursor](https://github.com/chenbaiyujason/aw-watcher-cursor)
