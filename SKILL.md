@@ -1,6 +1,6 @@
 ---
 name: aw-openclaw-connect
-description: Query and export cleaned ActivityWatch events through the formal `aw-connect` CLI. Use when an agent needs to inspect recent user activity, sync what the user was doing after a pause, recover what happened during an absence window, or turn ActivityWatch logs into natural-language memory entries. For OpenClaw-style agents, use this proactively after a gap of 30+ minutes, when the user asks what happened during a time range, or when periodic memory backfill is due.
+description: Query and export cleaned ActivityWatch events through the formal `aw-connect` CLI. Use when an agent needs to inspect recent user activity, sync what the user was doing after a pause, recover what happened during an absence window, or turn ActivityWatch logs into natural-language memory entries. For OpenClaw-style agents, this skill is mandatory after a gap of 30+ minutes, when the user asks what happened during a time range, during periodic memory backfill, or whenever memory files appear to be missing a long span leading up to the present. When querying memory or reconstructing what happened, if the recorded memory has a substantial gap near the current time, the agent must call this skill first to backfill missing behavior memory before continuing; it must not skip this step or rely only on other memory sources.
 ---
 
 # AW OpenClaw Connect Skill
@@ -8,7 +8,7 @@ description: Query and export cleaned ActivityWatch events through the formal `a
 ## 目的
 通过 ActivityWatch 获取并导出清洗后的用户活动记录。
 
-正式入口只有 `aw-connect` CLI：
+正式入口只有 `aw-connect` CLI，优先使用 AW：
 
 - 一律通过 CLI 调用
 - `query` 和 `export` 使用同一套过滤条件
@@ -73,21 +73,24 @@ aw-connect export --start 2026-03-06T10:00:00Z --end 2026-03-06T11:00:00Z --devi
 CSV 由两部分组成：
 
 - 头部：`#` 开头的 meta 行
-- 正文：`o(s),d(s),dev,w,sub,items`
+- 正文：`start,ds(min),dev,w,sub,items`
 
 关键字段：
 
 - `# start` / `# end`：查询范围
+- `# date` / `# dates`：导出结果实际覆盖到的日期
 - `# afk`：是否应用 AFK 清洗
 - `# dm`：设备短码映射
 - `# ws`：本次结果出现的 watcher family
-- `# ues`：跨设备并集后的有效时长，不是把每台设备时长直接相加
-- `o(s)`：相对开始时间的偏移秒
-- `d(s)`：事件段时长
+- `# ues(min)`：跨设备并集后的有效时长，单位是分钟，不是把每台设备时长直接相加
+- `start`：事件开始时间；单日结果通常只保留 `HH:MM:SS`，跨日时会在每个新日期首条保留完整日期时间
+- `ds(min)`：事件段时长，单位是分钟，保留两位小数
 - `dev`：事件来源设备，不代表这段时间只有这台设备重要
 - `w`：watcher family
 - `sub`：主题，例如应用名、项目名、域名
-- `items`：聚合后的详细内容
+- `items`：聚合后的详细内容；`web` 通常会优先保留标题，并附带 URL
+
+**拿到CSV路径后，必须全量读取！！避免丢失了信息。对于大量信息的顾虑，在调用之前就按照时间的拆分，但是默认情况下，你都可以完全加载CSV文件，插件已经自动压缩过了！
 
 `vscode` 结果约定：
 
@@ -151,7 +154,7 @@ CSV 由两部分组成：
 
 底线：
 
-- `# ues` 是跨设备并集时长，重叠时间不能直接累加
+- `# ues(min)` 是跨设备并集时长，重叠时间不能直接累加
 - `dev` 只说明事件来源设备，不等于只有这台设备重要
 
 判断步骤：
@@ -190,11 +193,13 @@ CSV 由两部分组成：
 - 对 `Cursor` / `Code` / 浏览器这类壳子窗口，优先当补充上下文
 - 如果同时有更具体的 `vscode` 或 `web`，优先相信更具体的记录
 - 单看 `window`，不要轻易推断主人具体完成了什么
+- 注意结合原本的日程补全，如这段时间日程可能在开某个会议，则这段时间的‘飞书’window 可能就是在开会
+- 主人和你交互的渠道也都是通过飞书 window，如果飞书 window 是最后的事件/最临近的事件，则该事件的时候是由主人在飞书跟你对话，请从上一个其他事件考虑，如最后两个事件是守望先锋和飞书，主人问你刚刚在干嘛，你说主人在玩守望先锋。
 
 ### `web`
 
 - 常见字段：`url`、`title`
-- 导出后常见表现：`sub=域名`，`items=更具体 URL`
+- 导出后常见表现：`sub=域名`，`items=页面标题 <URL>`
 - `web` 很适合补上下文，例如文档、PR、issue、搜索、后台页面
 - `web` 本身不等于工作成果
 - `localhost:5600` / `127.0.0.1:5600` 通常表示主人在看自己的时间记录或本地统计
@@ -294,7 +299,7 @@ CSV 默认存储位置：
 - 证据中等时，可以说“看起来像是在排查 / 对照 / 查资料 / 为某个改动做准备”
 - 证据较弱时，可以说“可能是在……”或“像是在……”
 
-## OpenClaw 风格 agent 的额外约定
+## OpenClaw 的额外约定
 
 - 当主人和你离开超过 30 分钟后再次对话，先检查记忆里是不是已经有这段时间的记录
 - 这里的“记忆”既包括当天的 `memory/YYYY-MM-DD.md`，也包括其他 session 可能已经提前写入的内容
@@ -305,7 +310,6 @@ CSV 默认存储位置：
 - 优先按主人给的时间范围取 log
 - 如果主人只表达了“离开期间”但没给具体时间，就补抓你不知晓的那段缺口
 
-- 定时补记忆属于安装约定：如果是 OpenClaw 风格 agent，应在安装时按 `README.md` 添加每 2 小时定时器，而不是等运行后再临时决定
 
 ## 行为约定
 

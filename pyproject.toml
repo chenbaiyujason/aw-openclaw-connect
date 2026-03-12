@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aw-openclaw-connect"
-version = "0.1.0"
+version = "0.1.1"
 description = "Local ActivityWatch querying and agent-friendly export CLI."
 readme = "README.md"
 requires-python = ">=3.12"

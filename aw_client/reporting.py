@@ -37,11 +37,11 @@ ExportEvent = TypedDict(
     {
         "start": str,
         "end": str,
-        "o(s)": float,
         "d(s)": float,
         "device": str,
         "watcher": str,
         "subject": str,
+        "merge_key": str,
         "items": list[ExportItem],
     },
     total=False,
@@ -51,6 +51,7 @@ ExportMeta = TypedDict(
     {
         "start": str,
         "end": str,
+        "dates": list[str],
         "apply_afk_cleanup": bool,
         "device_map": dict[str, str],
         "watchers": list[str],
@@ -152,7 +153,6 @@ def build_agent_friendly_payload(query_result: QueryResult) -> ExportPayload:
     """构建给 agent 使用的低重复、低噪声结果。"""
     cleaned_events = query_result.cleaned_events
     devices = sorted({event.source_device for event in cleaned_events})
-    base_start = query_result.filters.start
     device_code_map = {
         device_name: _index_to_device_code(index)
         for index, device_name in enumerate(devices)
@@ -168,22 +168,24 @@ def build_agent_friendly_payload(query_result: QueryResult) -> ExportPayload:
     recollapsed_events = collapse_adjacent_events(absorbed_editor_windows)
     browser_deduplicated_events = deduplicate_browser_window_segments(recollapsed_events)
     final_events = collapse_adjacent_events(browser_deduplicated_events)
-    relative_events = [_convert_event_to_relative_time(event, base_start) for event in final_events]
+    export_ready_events = [_prepare_event_for_csv(event) for event in final_events]
+    export_dates = _collect_export_dates(export_ready_events)
 
     return {
         "meta": {
             "start": _serialize_datetime(query_result.filters.start),
             "end": _serialize_datetime(query_result.filters.end),
+            "dates": export_dates,
             "apply_afk_cleanup": query_result.filters.apply_afk_cleanup,
             "device_map": {
                 device_code_map[device_name]: device_name
                 for device_name in devices
             },
             "watchers": watcher_families,
-            "event_count": len(relative_events),
+            "event_count": len(export_ready_events),
             "user_effective_seconds": round(query_result.user_effective_seconds, 3),
         },
-        "events": relative_events,
+        "events": export_ready_events,
     }
 
 
@@ -191,15 +193,23 @@ def render_agent_friendly_csv(payload: ExportPayload) -> str:
     """把 agent 友好的结构渲染成单文件 CSV。"""
     meta = payload["meta"]
     events = payload["events"]
+    export_dates = meta.get("dates", [])
+    is_multi_day = len(export_dates) > 1
 
     csv_buffer = io.StringIO()
     csv_writer = csv.writer(csv_buffer)
-    csv_writer.writerow(["o(s)", "d(s)", "dev", "w", "sub", "items"])
+    csv_writer.writerow(["start", "ds(min)", "dev", "w", "sub", "items"])
+    previous_date_text: str | None = None
     for event in events:
+        rendered_start, previous_date_text = _render_event_start_for_csv(
+            event=event,
+            previous_date_text=previous_date_text,
+            is_multi_day=is_multi_day,
+        )
         csv_writer.writerow(
             [
-                event.get("o(s)", ""),
-                event.get("d(s)", ""),
+                rendered_start,
+                _format_duration_minutes(event.get("d(s)")),
                 event.get("device", ""),
                 event.get("watcher", ""),
                 event.get("subject", ""),
@@ -212,11 +222,12 @@ def render_agent_friendly_csv(payload: ExportPayload) -> str:
         f"# tok_est,{_estimate_openai_tokens(csv_body)}",
         f"# start,{meta.get('start', '')}",
         f"# end,{meta.get('end', '')}",
+        _render_dates_header_line(export_dates),
         f"# afk,{_bool_to_int(meta.get('apply_afk_cleanup'))}",
         f"# dm,{_render_device_map(meta.get('device_map'))}",
         f"# ws,{_render_string_list(meta.get('watchers'))}",
         f"# ec,{meta.get('event_count', 0)}",
-        f"# ues,{meta.get('user_effective_seconds', 0)}",
+        f"# ues(min),{_format_duration_minutes(meta.get('user_effective_seconds'))}",
     ]
     return "\n".join(header_lines) + "\n" + csv_body
 
@@ -226,7 +237,7 @@ def _serialize_atomic_event(
     device_code_map: dict[str, str],
 ) -> ExportEvent:
     """把单条原子事件序列化为可进一步合并的段。"""
-    subject_value, content_value = _extract_subject_and_content(event)
+    subject_value, content_value, merge_key_value = _extract_subject_and_content(event)
     serialized_event: ExportEvent = {
         "start": _serialize_datetime(event.start),
         "end": _serialize_datetime(event.end),
@@ -234,6 +245,7 @@ def _serialize_atomic_event(
         "device": device_code_map.get(event.source_device, event.source_device),
         "watcher": event.watcher_family,
         "subject": subject_value,
+        "merge_key": merge_key_value,
         "items": [
             {
                 "content": content_value,
@@ -267,13 +279,22 @@ def _render_string_list(value: list[str]) -> str:
     return "|".join(str(item) for item in value)
 
 
+def _render_dates_header_line(value: list[str]) -> str:
+    """把导出覆盖到的日期范围压成单行。"""
+    if not value:
+        return "# dates,"
+    if len(value) == 1:
+        return f"# date,{value[0]}"
+    return f"# dates,{_render_string_list(value)}"
+
+
 def _render_items_field(value: list[ExportItem]) -> str:
     """把 items 列表压成 CSV 单字段。"""
     parts: list[str] = []
     for item in value:
         content_value = item["content"]
-        duration_value = item["d(s)"]
-        parts.append(f"{content_value}:{duration_value}")
+        duration_text = _format_duration_minutes(item["d(s)"])
+        parts.append(f"{content_value}:{duration_text}m")
     return "|".join(parts)
 
 
@@ -306,24 +327,58 @@ def _estimate_openai_tokens(text: str) -> int:
     return max(1, round(len(text) / 2.4))
 
 
-def _convert_event_to_relative_time(
-    event: ExportEvent,
-    base_start: datetime,
-) -> ExportEvent:
-    """把事件起止时间改写成相对 meta.start 的偏移秒。"""
-    relative_event = _clone_event_segment(event)
-    start_value = relative_event.pop("start", None)
-    end_value = relative_event.pop("end", None)
+def _prepare_event_for_csv(event: ExportEvent) -> ExportEvent:
+    """保留绝对开始时间，移除只在内部合并阶段使用的 end。"""
+    export_event = _clone_event_segment(event)
+    start_value = export_event.get("start")
+    end_value = export_event.pop("end", None)
+    export_event.pop("merge_key", None)
     if not isinstance(start_value, str) or not isinstance(end_value, str):
-        raise ValueError("事件缺少 start/end，无法转换为相对时间。")
+        raise ValueError("事件缺少 start/end，无法转换为导出格式。")
+    if _should_hide_redundant_items(export_event):
+        export_event["items"] = []
+    return export_event
 
-    relative_event["o(s)"] = round(
-        _parse_serialized_datetime(start_value).timestamp() - base_start.astimezone(timezone.utc).timestamp(),
-        3,
-    )
-    if _should_hide_redundant_items(relative_event):
-        relative_event["items"] = []
-    return relative_event
+
+def _format_duration_minutes(value: object) -> str:
+    """把秒数格式化成分钟，保留两位小数。"""
+    if not isinstance(value, (int, float)):
+        return ""
+    return f"{max(float(value), 0.0) / 60:.2f}"
+
+
+def _collect_export_dates(events: list[ExportEvent]) -> list[str]:
+    """提取导出事件实际覆盖到的 UTC 日期。"""
+    date_texts: list[str] = []
+    seen_dates: set[str] = set()
+    for event in events:
+        start_value = event.get("start")
+        if not isinstance(start_value, str):
+            continue
+        date_text = _parse_serialized_datetime(start_value).strftime("%Y-%m-%d")
+        if date_text in seen_dates:
+            continue
+        seen_dates.add(date_text)
+        date_texts.append(date_text)
+    return date_texts
+
+
+def _render_event_start_for_csv(
+    event: ExportEvent,
+    previous_date_text: str | None,
+    is_multi_day: bool,
+) -> tuple[str, str | None]:
+    """把开始时间压缩到秒；跨天时只在每个日期首条保留日期。"""
+    start_value = event.get("start")
+    if not isinstance(start_value, str):
+        return "", previous_date_text
+
+    start_datetime = _parse_serialized_datetime(start_value)
+    date_text = start_datetime.strftime("%Y-%m-%d")
+    time_text = start_datetime.strftime("%H:%M:%S")
+    if is_multi_day and date_text != previous_date_text:
+        return f"{date_text}T{time_text}", date_text
+    return time_text, date_text
 
 
 def collapse_adjacent_events(events: list[ExportEvent]) -> list[ExportEvent]:
@@ -545,7 +600,7 @@ def _segment_signature(event: ExportEvent) -> tuple[str | None, str | None, str 
     """提取段级签名，决定哪些相邻事件可压缩到一起。"""
     merge_subject = cast(str | None, event.get("subject"))
     if event.get("watcher") == "web":
-        merge_subject = _first_item_content(event) or merge_subject
+        merge_subject = cast(str | None, event.get("merge_key")) or _first_item_content(event) or merge_subject
     return (
         cast(str | None, event.get("device")),
         cast(str | None, event.get("watcher")),
@@ -560,18 +615,24 @@ def _parse_serialized_datetime(value: object) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
 
 
-def _extract_subject_and_content(event: EventInterval) -> tuple[str, str]:
+def _extract_subject_and_content(event: EventInterval) -> tuple[str, str, str]:
     """为任意 watcher 提取一个稳定主体和一个具体内容。"""
     if event.watcher_family == "window":
         subject_value = _pick_first_string(event.data, ("app",)) or "window"
         content_value = _pick_first_string(event.data, ("title",)) or subject_value
-        return subject_value, content_value
+        return subject_value, content_value, content_value
 
     if event.watcher_family == "web":
         url_value = _pick_first_string(event.data, ("url",))
+        title_value = _pick_first_string(event.data, ("title",))
         subject_value = _extract_url_host(url_value) or "web"
-        content_value = url_value or _pick_first_string(event.data, ("title",)) or subject_value
-        return subject_value, content_value
+        content_value = _format_web_item_content(
+            url_value=url_value,
+            title_value=title_value,
+            subject_value=subject_value,
+        )
+        merge_key_value = url_value or title_value or subject_value
+        return subject_value, content_value, merge_key_value
 
     if event.watcher_family == "vscode":
         activity_kind = _normalize_vscode_activity_kind(event.data.get("activityKind"))
@@ -584,11 +645,28 @@ def _extract_subject_and_content(event: EventInterval) -> tuple[str, str]:
             event_name=_pick_first_string(event.data, ("eventName",)),
             title_value=_pick_first_string(event.data, ("title",)),
         )
-        return subject_value, content_value
+        return subject_value, content_value, content_value
 
     subject_value = _pick_first_string(event.data, ("app", "project", "language", "eventName", "subject", "branch")) or event.watcher_family
     content_value = _pick_first_string(event.data, ("title", "url", "file", "subject", "branch", "eventName")) or subject_value
-    return subject_value, content_value
+    return subject_value, content_value, content_value
+
+
+def _format_web_item_content(
+    url_value: str | None,
+    title_value: str | None,
+    subject_value: str,
+) -> str:
+    """web 导出优先展示 title，同时保留 URL 便于定位具体页面。"""
+    normalized_title = (title_value or "").strip()
+    normalized_url = (url_value or "").strip()
+    if normalized_title and normalized_url:
+        return f"{normalized_title} <{normalized_url}>"
+    if normalized_title:
+        return normalized_title
+    if normalized_url:
+        return normalized_url
+    return subject_value
 
 
 def _normalize_item_name(content_value: str) -> str:
