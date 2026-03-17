@@ -113,6 +113,8 @@ def detect_watcher_family(bucket_id: str, client: str, bucket_type: str) -> str:
         return "afk"
     if bucket_id.startswith("aw-watcher-window_") or client == "aw-watcher-window" or bucket_type == "currentwindow":
         return "window"
+    if bucket_id.startswith("aw-watcher-vscode-agent_") or bucket_type == "com.activitywatch.cursor.agent.lifecycle":
+        return "agent"
     if bucket_id.startswith("aw-watcher-vscode_") or client == "aw-watcher-vscode" or bucket_type == "app.editor.activity":
         return "vscode"
     if bucket_id.startswith("aw-watcher-web-") or client == "aw-client-web" or bucket_type.startswith("web."):

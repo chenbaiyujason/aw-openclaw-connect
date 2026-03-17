@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import datetime
 
 from aw_client.bucket_registry import BucketRegistry, build_bucket_registry
 from aw_client.event_loader import deduplicate_events, load_events_for_family
@@ -67,6 +67,7 @@ class QueryService:
         devices: list[str] | None = None,
         watchers: list[str] | None = None,
         apply_afk_cleanup: bool = True,
+        agent_bypass: bool = False,
     ) -> QueryResult:
         """返回清洗后的应用事件。"""
         normalized_filters = self._build_filters(
@@ -75,6 +76,7 @@ class QueryService:
             devices=devices,
             watchers=watchers,
             apply_afk_cleanup=apply_afk_cleanup,
+            agent_bypass=agent_bypass,
         )
         return self.query_events_for_filters(normalized_filters)
 
@@ -149,6 +151,7 @@ class QueryService:
         devices: list[str] | None = None,
         watchers: list[str] | None = None,
         apply_afk_cleanup: bool = True,
+        agent_bypass: bool = False,
     ) -> QueryFilters:
         """统一把输入参数归一化为强类型查询过滤器。"""
         normalized_start = self._coerce_datetime(start)
@@ -162,6 +165,7 @@ class QueryService:
             devices=tuple(sorted(devices or [])),
             watchers=tuple(sorted(watchers or [])),
             apply_afk_cleanup=apply_afk_cleanup,
+            agent_bypass=agent_bypass,
         )
 
     def _coerce_datetime(self, value: datetime | str) -> datetime:
@@ -188,7 +192,11 @@ class QueryService:
     ) -> list[str]:
         """解析最终要查询的 watcher family 集合。"""
         if requested_watchers:
-            return list(requested_watchers)
+            resolved_watchers = list(requested_watchers)
+            # agent 导出需要相邻的 vscode 文件活动做工作区判定，因此这里顺带补上下文。
+            if "agent" in requested_watchers and "vscode" not in requested_watchers:
+                resolved_watchers.append("vscode")
+            return resolved_watchers
 
         watchers: set[str] = set()
         for device_name in selected_devices:

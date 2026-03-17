@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import re
 
 from aw_client.models import EffectiveTimeSlice, EventInterval
+
+
+FRACTIONAL_SECONDS_PATTERN = re.compile(r"(\.\d{6})\d+")
 
 
 def parse_aw_timestamp(value: str | None) -> datetime | None:
@@ -11,18 +15,18 @@ def parse_aw_timestamp(value: str | None) -> datetime | None:
     if not value:
         return None
 
-    normalized_value = value.replace("Z", "+00:00")
+    normalized_value = FRACTIONAL_SECONDS_PATTERN.sub(r"\1", value.replace("Z", "+00:00"))
     parsed_value = datetime.fromisoformat(normalized_value)
     if parsed_value.tzinfo is None:
-        return parsed_value.replace(tzinfo=UTC)
-    return parsed_value.astimezone(UTC)
+        return parsed_value.replace(tzinfo=timezone.utc)
+    return parsed_value.astimezone(timezone.utc)
 
 
 def ensure_utc(value: datetime) -> datetime:
     """统一把时间转成 UTC，避免跨设备时区差异干扰比较。"""
     if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def clamp_interval(
@@ -123,6 +127,23 @@ def clip_event_to_slices(
     clipped_events: list[EventInterval] = []
 
     for valid_slice in valid_slices:
+        if event.start == event.end:
+            if valid_slice.start <= event.start <= valid_slice.end:
+                clipped_events.append(
+                    EventInterval(
+                        event_id=event.event_id,
+                        start=event.start,
+                        end=event.end,
+                        watcher_family=event.watcher_family,
+                        source_device=event.source_device,
+                        data=dict(event.data),
+                        source_buckets=tuple(sorted(set(event.source_buckets) | set(valid_slice.source_buckets))),
+                        active_devices=valid_slice.active_devices,
+                        source_priority=event.source_priority,
+                    )
+                )
+            continue
+
         clipped_range = clamp_interval(event.start, event.end, valid_slice.start, valid_slice.end)
         if clipped_range is None:
             continue
@@ -130,6 +151,7 @@ def clip_event_to_slices(
         clipped_start, clipped_end = clipped_range
         clipped_events.append(
             EventInterval(
+                event_id=event.event_id,
                 start=clipped_start,
                 end=clipped_end,
                 watcher_family=event.watcher_family,

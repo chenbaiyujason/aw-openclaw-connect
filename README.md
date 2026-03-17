@@ -44,6 +44,8 @@ aw-connect devices
 aw-connect watchers --device macbook
 aw-connect query --minutes 15
 aw-connect export --minutes 60
+aw-connect export --watcher agent --minutes 10
+aw-connect export --watcher agent --minutes 10 --agent-bypass
 aw-connect export --start 2026-03-06T10:00:00Z --end 2026-03-06T11:00:00Z --device macbook --watcher window --output logs/session.csv
 ```
 
@@ -59,9 +61,26 @@ aw-connect export --start 2026-03-06T10:00:00Z --end 2026-03-06T11:00:00Z --devi
 - `--start` / `--end`
 - `--device`
 - `--watcher`
+- `--agent-bypass`
 - `--apply-afk-cleanup` / `--no-afk-cleanup`
 
 其中 `--watcher` 按 watcher family 工作，并会自动包含对应的 synced bucket。
+不传 `--watcher` 时，默认就是当前机器上存在的全部 watcher family；如果这台机器有 `agent` bucket，也会自动包含进全量结果。
+
+当 `--watcher agent` 且未传 `--agent-bypass` 时，系统默认会先做一层 agent 预压缩：
+
+- 每个 `conversationId` 的首条消息会调用 Gemini 生成 `title`
+- 每条消息都会尝试生成 `user prompt` 总结
+- 但非首条消息如果清洗后的 `body` 少于 100 字，则直接保留原文，不再调用 Gemini
+
+如果不希望预压缩，例如本机没有安装 VSCode watcher，或者你想把原始 agent 消息都交给下游 agent 自己统一理解，可以显式传：
+
+```bash
+aw-connect export --watcher agent --minutes 10 --agent-bypass
+```
+
+这时会直接输出清洗后的原始 agent 消息，不会提前生成 title / summary。
+raw 模式会保留顶部 meta，并把正文简化为 `start,workspace,body`。
 
 当前 CSV 导出会额外遵循这些约定：
 

@@ -49,13 +49,20 @@ def load_events_for_bucket(
     interval_events: list[EventInterval] = []
 
     for raw_event in raw_events:
-        clamped_range = clamp_interval(raw_event.timestamp, create_event_end(raw_event.timestamp, raw_event.duration_seconds), start, end)
+        event_end = create_event_end(raw_event.timestamp, raw_event.duration_seconds)
+        if raw_event.duration_seconds <= 0:
+            if raw_event.timestamp < start or raw_event.timestamp > end:
+                continue
+            clamped_range = (raw_event.timestamp, raw_event.timestamp)
+        else:
+            clamped_range = clamp_interval(raw_event.timestamp, event_end, start, end)
         if clamped_range is None:
             continue
 
         clamped_start, clamped_end = clamped_range
         interval_events.append(
             EventInterval(
+                event_id=raw_event.event_id,
                 start=clamped_start,
                 end=clamped_end,
                 watcher_family=normalized_bucket.watcher_family,
@@ -90,6 +97,7 @@ def deduplicate_events(events: list[EventInterval]) -> list[EventInterval]:
         merged_buckets = tuple(sorted(set(existing_event.source_buckets) | set(event.source_buckets)))
         preferred_event = existing_event if existing_event.source_priority <= event.source_priority else event
         deduped_events[event_key] = EventInterval(
+            event_id=preferred_event.event_id,
             start=preferred_event.start,
             end=preferred_event.end,
             watcher_family=preferred_event.watcher_family,
@@ -114,5 +122,7 @@ def build_event_signature(watcher_family: str, data: dict[str, object]) -> tuple
     if watcher_family == "vscode":
         # vscode 单轨里需要把停留/编辑状态也纳入签名，避免清洗时把两者误判成同类事件。
         return (data.get("eventName"), data.get("project"), data.get("file"), data.get("activityKind"))
+    if watcher_family == "agent":
+        return (data.get("eventName"), data.get("conversationId"), data.get("body"))
 
     return tuple(sorted((key, repr(value)) for key, value in data.items()))

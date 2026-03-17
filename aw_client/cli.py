@@ -22,6 +22,7 @@ class CliQueryRequest:
     devices: tuple[str, ...]
     watchers: tuple[str, ...]
     apply_afk_cleanup: bool
+    agent_bypass: bool
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -105,6 +106,12 @@ def _add_common_query_arguments(parser: argparse.ArgumentParser) -> None:
         action="append",
         default=[],
         help="按 watcher family 过滤；会自动包含该 family 下的 synced bucket。",
+    )
+    parser.add_argument(
+        "--agent-bypass",
+        dest="agent_bypass",
+        action="store_true",
+        help="关闭 agent 预压缩，直接输出清洗后的原始 agent 消息，交给后续 agent 自己统一理解。",
     )
 
     # 默认开启 AFK 清洗，但保留显式开关，方便 agent 在命令层表达意图。
@@ -190,6 +197,7 @@ def _build_query_request(parsed_args: argparse.Namespace) -> CliQueryRequest:
         devices=device_values,
         watchers=watcher_values,
         apply_afk_cleanup=bool(parsed_args.apply_afk_cleanup),
+        agent_bypass=bool(parsed_args.agent_bypass),
     )
 
 
@@ -236,6 +244,7 @@ def _execute_query(query_request: CliQueryRequest):
         devices=list(query_request.devices) or None,
         watchers=list(query_request.watchers) or None,
         apply_afk_cleanup=query_request.apply_afk_cleanup,
+        agent_bypass=query_request.agent_bypass,
     )
 
 

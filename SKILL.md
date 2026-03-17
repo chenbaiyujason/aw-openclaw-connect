@@ -31,6 +31,8 @@ aw-connect watchers
 aw-connect watchers --device macbook
 aw-connect query --minutes 15
 aw-connect export --minutes 60
+aw-connect export --watcher agent --minutes 10
+aw-connect export --watcher agent --minutes 10 --agent-bypass
 aw-connect export --start 2026-03-06T10:00:00Z --end 2026-03-06T11:00:00Z --device macbook --watcher web --output logs/session.csv
 ```
 
@@ -61,12 +63,29 @@ aw-connect export --start 2026-03-06T10:00:00Z --end 2026-03-06T11:00:00Z --devi
 
 - `--device` 按逻辑设备名过滤
 - `--watcher` 按 watcher family 过滤，例如 `window`、`web`、`vscode`
+- `--agent-bypass` 只对 `--watcher agent` 有意义，关闭 agent 预压缩，直接输出清洗后的原始 agent 消息
+- 不传 `--watcher` 时，默认就是当前机器上能发现的全部 watcher family；如果存在 `agent` bucket，也会自动包含在全量结果里
 - watcher family 过滤会自动包含对应的 synced bucket
 - agent 不需要关心底层 bucket 名里的 `synced-from-*`
 - `aw-watcher-cursor` 这类拆分来源统一兼容到 `vscode`
 - `vscode` family 兼容文件活动、Agent 生命周期、Git commit 归档等语义
 - 文件活动会保留 `activityKind`，例如 `dwell` / `edit`
 - 只想快速补看近期活动时，优先只给时间条件，例如 `--minutes 15`
+
+`agent` watcher 默认行为：
+
+- 默认会先做一层预压缩，再输出 `work,user prompt,title`
+- 每个 conversation 的首条消息一定会调用 Gemini 生成 `title`
+- 每条消息默认会生成 `user prompt`
+- 但非首条消息如果清洗后的 `body` 少于 100 字，则直接保留原文，不调用 Gemini
+
+如果你不希望这里提前做压缩，而是想让后续 agent 自己全量看原始 agent 消息，则必须显式传：
+
+```bash
+aw-connect export --watcher agent --minutes 10 --agent-bypass
+```
+
+此时会保留顶部 meta，正文只输出 `start,workspace,body`。
 
 ## 输出格式
 

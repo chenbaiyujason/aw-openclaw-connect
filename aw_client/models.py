@@ -63,6 +63,7 @@ class RawEvent:
 class EventInterval:
     """归一化后的通用事件区间。"""
 
+    event_id: int | str | None
     start: datetime
     end: datetime
     watcher_family: str
@@ -115,6 +116,7 @@ class QueryFilters:
     devices: tuple[str, ...] = field(default_factory=tuple)
     watchers: tuple[str, ...] = field(default_factory=tuple)
     apply_afk_cleanup: bool = True
+    agent_bypass: bool = False
 
 
 @dataclass(slots=True)

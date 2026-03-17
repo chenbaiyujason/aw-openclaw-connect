@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TypedDict, cast
 from urllib.parse import urlparse
 
+from aw_client.agent_reporting import _clean_prompt_body, _should_keep_prompt_event, render_agent_csv, should_render_agent_csv
 from aw_client.models import EventInterval, QueryResult
 from aw_client.query_service import QueryService
 from aw_client.rest_client import ActivityWatchRestClient
@@ -145,6 +146,8 @@ def export_last_4h_cleaned_log(
 
 def render_query_result(query_result: QueryResult) -> str:
     """把查询结果渲染成单文件 CSV，头部携带压缩 meta。"""
+    if should_render_agent_csv(query_result):
+        return render_agent_csv(query_result)
     serializable_payload = build_agent_friendly_payload(query_result)
     return render_agent_friendly_csv(serializable_payload)
 
@@ -601,6 +604,8 @@ def _segment_signature(event: ExportEvent) -> tuple[str | None, str | None, str 
     merge_subject = cast(str | None, event.get("subject"))
     if event.get("watcher") == "web":
         merge_subject = cast(str | None, event.get("merge_key")) or _first_item_content(event) or merge_subject
+    if event.get("watcher") == "agent":
+        merge_subject = cast(str | None, event.get("merge_key")) or _first_item_content(event) or merge_subject
     return (
         cast(str | None, event.get("device")),
         cast(str | None, event.get("watcher")),
@@ -647,9 +652,33 @@ def _extract_subject_and_content(event: EventInterval) -> tuple[str, str, str]:
         )
         return subject_value, content_value, content_value
 
+    if event.watcher_family == "agent":
+        raw_body = _pick_first_string(event.data, ("body",)) or ""
+        cleaned_body = _clean_prompt_body(raw_body)
+        if not _should_keep_prompt_event(raw_body, cleaned_body):
+            cleaned_body = ""
+        workspace_value = _extract_agent_workspace(event.data.get("workspaceRoots"))
+        subject_value = workspace_value or "agent"
+        content_value = cleaned_body or raw_body or subject_value
+        merge_key_value = f"{event.data.get('conversationId', 'agent')}:{event.event_id or event.start.isoformat()}"
+        return subject_value, content_value, merge_key_value
+
     subject_value = _pick_first_string(event.data, ("app", "project", "language", "eventName", "subject", "branch")) or event.watcher_family
     content_value = _pick_first_string(event.data, ("title", "url", "file", "subject", "branch", "eventName")) or subject_value
     return subject_value, content_value, content_value
+
+
+def _extract_agent_workspace(value: object) -> str | None:
+    """从 agent 的 workspaceRoots 中提取一个简短工作区名。"""
+    if not isinstance(value, list) or not value:
+        return None
+    first_item = value[0]
+    if not isinstance(first_item, str) or not first_item:
+        return None
+    normalized_path = first_item.replace("\\", "/").rstrip("/")
+    if not normalized_path:
+        return None
+    return Path(normalized_path).name or normalized_path
 
 
 def _format_web_item_content(
