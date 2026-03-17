@@ -63,7 +63,7 @@ aw-connect export --start 2026-03-06T10:00:00Z --end 2026-03-06T11:00:00Z --devi
 
 - `--device` 按逻辑设备名过滤
 - `--watcher` 按 watcher family 过滤，例如 `window`、`web`、`vscode`
-- `--agent-bypass` 只对 `--watcher agent` 有意义，关闭 agent 预压缩，直接输出清洗后的原始 agent 消息
+- `--agent-bypass` 只对 `--watcher agent` 有意义，关闭 agent 预压缩
 - 不传 `--watcher` 时，默认就是当前机器上能发现的全部 watcher family；如果存在 `agent` bucket，也会自动包含在全量结果里
 - watcher family 过滤会自动包含对应的 synced bucket
 - agent 不需要关心底层 bucket 名里的 `synced-from-*`
@@ -74,9 +74,10 @@ aw-connect export --start 2026-03-06T10:00:00Z --end 2026-03-06T11:00:00Z --devi
 
 `agent` watcher 默认行为：
 
-- 默认会先做一层预压缩，再输出 `work,user prompt,title`
-- 每个 conversation 的首条消息一定会调用 Gemini 生成 `title`
+- 默认会先做一层预压缩，但最终仍然并入统一 CSV 格式 `start,ds(min),dev,w,sub,items`
+- 每个 conversation 的首条消息一定会通过 Gemini REST API 生成 `title`
 - 每条消息默认会生成 `user prompt`
+- 结构化输出通过 JSON Schema 强制约束，不再依赖提示词里的 JSON 格式定义
 - 但非首条消息如果清洗后的 `body` 少于 100 字，则直接保留原文，不调用 Gemini
 
 如果你不希望这里提前做压缩，而是想让后续 agent 自己全量看原始 agent 消息，则必须显式传：
@@ -85,7 +86,7 @@ aw-connect export --start 2026-03-06T10:00:00Z --end 2026-03-06T11:00:00Z --devi
 aw-connect export --watcher agent --minutes 10 --agent-bypass
 ```
 
-此时会保留顶部 meta，正文只输出 `start,workspace,body`。
+此时只是不再提前生成 `title` / `user_prompt`，但最终导出格式仍是统一 CSV。
 
 ## 输出格式
 

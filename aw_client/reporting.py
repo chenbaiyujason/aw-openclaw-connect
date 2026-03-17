@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TypedDict, cast
 from urllib.parse import urlparse
 
-from aw_client.agent_reporting import _clean_prompt_body, _should_keep_prompt_event, render_agent_csv, should_render_agent_csv
+from aw_client.agent_reporting import _clean_prompt_body, _should_keep_prompt_event, build_agent_export_overrides
 from aw_client.models import EventInterval, QueryResult
 from aw_client.query_service import QueryService
 from aw_client.rest_client import ActivityWatchRestClient
@@ -146,8 +146,6 @@ def export_last_4h_cleaned_log(
 
 def render_query_result(query_result: QueryResult) -> str:
     """把查询结果渲染成单文件 CSV，头部携带压缩 meta。"""
-    if should_render_agent_csv(query_result):
-        return render_agent_csv(query_result)
     serializable_payload = build_agent_friendly_payload(query_result)
     return render_agent_friendly_csv(serializable_payload)
 
@@ -155,13 +153,17 @@ def render_query_result(query_result: QueryResult) -> str:
 def build_agent_friendly_payload(query_result: QueryResult) -> ExportPayload:
     """构建给 agent 使用的低重复、低噪声结果。"""
     cleaned_events = query_result.cleaned_events
+    agent_export_overrides = build_agent_export_overrides(query_result)
     devices = sorted({event.source_device for event in cleaned_events})
     device_code_map = {
         device_name: _index_to_device_code(index)
         for index, device_name in enumerate(devices)
     }
     watcher_families = sorted({event.watcher_family for event in cleaned_events})
-    serialized_events = [_serialize_atomic_event(event, device_code_map) for event in cleaned_events]
+    serialized_events = [
+        _serialize_atomic_event(event, device_code_map, agent_export_overrides)
+        for event in cleaned_events
+    ]
     fused_atomic_events = fuse_vscode_with_window_events(serialized_events)
     # 先对原子级事件防抖，避免 web/window 的微小脉冲先被粗合并放大。
     debounced_atomic_events = apply_atomic_debounce(fused_atomic_events)
@@ -238,9 +240,10 @@ def render_agent_friendly_csv(payload: ExportPayload) -> str:
 def _serialize_atomic_event(
     event: EventInterval,
     device_code_map: dict[str, str],
+    agent_export_overrides: dict[str, tuple[str, str, str]],
 ) -> ExportEvent:
     """把单条原子事件序列化为可进一步合并的段。"""
-    subject_value, content_value, merge_key_value = _extract_subject_and_content(event)
+    subject_value, content_value, merge_key_value = _extract_subject_and_content(event, agent_export_overrides)
     serialized_event: ExportEvent = {
         "start": _serialize_datetime(event.start),
         "end": _serialize_datetime(event.end),
@@ -620,7 +623,10 @@ def _parse_serialized_datetime(value: object) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
 
 
-def _extract_subject_and_content(event: EventInterval) -> tuple[str, str, str]:
+def _extract_subject_and_content(
+    event: EventInterval,
+    agent_export_overrides: dict[str, tuple[str, str, str]],
+) -> tuple[str, str, str]:
     """为任意 watcher 提取一个稳定主体和一个具体内容。"""
     if event.watcher_family == "window":
         subject_value = _pick_first_string(event.data, ("app",)) or "window"
@@ -653,6 +659,10 @@ def _extract_subject_and_content(event: EventInterval) -> tuple[str, str, str]:
         return subject_value, content_value, content_value
 
     if event.watcher_family == "agent":
+        stable_event_id = str(event.event_id) if event.event_id is not None else ""
+        override_value = agent_export_overrides.get(stable_event_id)
+        if override_value is not None:
+            return override_value
         raw_body = _pick_first_string(event.data, ("body",)) or ""
         cleaned_body = _clean_prompt_body(raw_body)
         if not _should_keep_prompt_event(raw_body, cleaned_body):

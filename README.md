@@ -69,8 +69,9 @@ aw-connect export --start 2026-03-06T10:00:00Z --end 2026-03-06T11:00:00Z --devi
 
 当 `--watcher agent` 且未传 `--agent-bypass` 时，系统默认会先做一层 agent 预压缩：
 
-- 每个 `conversationId` 的首条消息会调用 Gemini 生成 `title`
+- 每个 `conversationId` 的首条消息会通过 Gemini REST API 生成 `title`
 - 每条消息都会尝试生成 `user prompt` 总结
+- 结构化输出通过 JSON Schema 强制约束，不再依赖提示词里的 JSON 格式约定
 - 但非首条消息如果清洗后的 `body` 少于 100 字，则直接保留原文，不再调用 Gemini
 
 如果不希望预压缩，例如本机没有安装 VSCode watcher，或者你想把原始 agent 消息都交给下游 agent 自己统一理解，可以显式传：
@@ -79,8 +80,8 @@ aw-connect export --start 2026-03-06T10:00:00Z --end 2026-03-06T11:00:00Z --devi
 aw-connect export --watcher agent --minutes 10 --agent-bypass
 ```
 
-这时会直接输出清洗后的原始 agent 消息，不会提前生成 title / summary。
-raw 模式会保留顶部 meta，并把正文简化为 `start,workspace,body`。
+这时会关闭 agent 预压缩，不会提前生成 title / summary。
+但无论是否压缩，最终都仍然走统一 CSV 格式，不会切到单独的 agent 专用三列表。
 
 当前 CSV 导出会额外遵循这些约定：
 
