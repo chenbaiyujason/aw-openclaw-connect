@@ -47,7 +47,7 @@ aw-connect --help
 {
   "git_sync": {
     "enabled": true,
-    "organization_names": ["organization_names"],
+    "organization_names": [],
     "branch_names": ["dev"]
   }
 }
@@ -56,6 +56,7 @@ aw-connect --help
 - `enabled`：是否启用查询前的 GitHub commit 补齐
 - `organization_names`：除了当前 `gh` 登录用户自己的仓库外，还会额外扫描的组织
 - `branch_names`：除仓库默认分支外，还要额外扫描的分支；默认分支始终会被查询
+- 默认不会附带任何额外组织；如果你需要扫描自己的私有组织，请显式把组织名写进 `organization_names`
 
 配置读取顺序如下：
 
