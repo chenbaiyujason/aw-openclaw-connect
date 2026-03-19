@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Sequence
 
+from aw_client.github_sync import sync_github_commits_for_range
 from aw_client.intervals import parse_aw_timestamp
 from aw_client.query_service import QueryService
 from aw_client.reporting import render_query_result, write_query_result
@@ -237,6 +238,7 @@ def _resolve_time_range(parsed_args: argparse.Namespace) -> tuple[datetime, date
 
 def _execute_query(query_request: CliQueryRequest):
     """执行统一查询，确保 query/export 共享完全相同的结果。"""
+    _sync_github_commits_if_needed(query_request)
     query_service = QueryService()
     return query_service.query_events(
         start=query_request.start,
@@ -246,6 +248,21 @@ def _execute_query(query_request: CliQueryRequest):
         apply_afk_cleanup=query_request.apply_afk_cleanup,
         agent_bypass=query_request.agent_bypass,
     )
+
+
+def _sync_github_commits_if_needed(query_request: CliQueryRequest) -> None:
+    """只有查询可能包含 vscode/git 结果时，才在拉取前执行 GitHub 补齐。"""
+    if query_request.watchers and "vscode" not in query_request.watchers:
+        return
+
+    try:
+        sync_github_commits_for_range(
+            start=query_request.start,
+            end=query_request.end,
+        )
+    except Exception as error:
+        # 同步失败不应阻断主查询流程，只在 stderr 给出提示。
+        print(f"警告: GitHub commit 补齐失败，已跳过。原因: {error}", file=sys.stderr)
 
 
 if __name__ == "__main__":

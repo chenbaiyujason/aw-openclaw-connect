@@ -37,6 +37,39 @@ aw-connect --help
 6. 如果触发落在当天晚上 12 点附近，再额外读取当天相关记忆，结合当天补回的 log 写回长期记忆
 7. 日终长期记忆重点写主线任务、明确结果、仍在中间阶段的事，不要写成流水账
 
+## 本地配置
+
+项目根目录提供了一个本地配置文件：`aw-connect.config.json`。
+
+当前支持的 Git 同步配置项：
+
+```json
+{
+  "git_sync": {
+    "enabled": true,
+    "organization_names": ["organization_names"],
+    "branch_names": ["dev"]
+  }
+}
+```
+
+- `enabled`：是否启用查询前的 GitHub commit 补齐
+- `organization_names`：除了当前 `gh` 登录用户自己的仓库外，还会额外扫描的组织
+- `branch_names`：除仓库默认分支外，还要额外扫描的分支；默认分支始终会被查询
+
+配置读取顺序如下：
+
+1. 环境变量 `AW_CONNECT_CONFIG` 指定的文件
+2. 当前工作目录下的 `aw-connect.config.json`
+3. 用户目录下的 `~/.aw-connect/aw-connect.config.json`
+4. 用户目录下的 `~/aw-connect.config.json`
+5. CLI 入口脚本同目录下的 `aw-connect.config.json`
+6. Python 解释器目录下的 `aw-connect.config.json`
+7. 项目根目录下的 `aw-connect.config.json`
+8. 安装包内置默认配置
+
+这意味着无论是源码方式运行，还是通过 `pip install` 安装后从命令行运行，都会先读你本地覆盖配置；如果本地没有，再回落到安装包里的默认配置。
+
 ## 常用命令
 
 ```bash

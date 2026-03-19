@@ -1,0 +1,11 @@
+{
+  "git_sync": {
+    "enabled": true,
+    "organization_names": [
+      ""
+    ],
+    "branch_names": [
+      "dev"
+    ]
+  }
+}

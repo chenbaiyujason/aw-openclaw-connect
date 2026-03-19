@@ -15,3 +15,6 @@ aw-connect = "aw_client.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["aw_client*"]
+
+[tool.setuptools.package-data]
+aw_client = ["defaults/*.json"]

@@ -68,22 +68,17 @@ class ActivityWatchRestClient:
             return cast(dict[str, object], response_payload)
         return {"value": response_payload}
 
-    def run_query(
-        self,
-        timeperiods: list[str],
-        query_strings: list[str],
-        name: str | None = None,
-    ) -> object:
-        """保留对 `/query/` 的支持，便于后续补充 AQL 能力。"""
-        endpoint = "/query/"
-        if name:
-            endpoint = f"{endpoint}?{parse.urlencode({'name': name})}"
+    def post_event(self, bucket_id: str, event: dict[str, object]) -> None:
+        """向指定 bucket 发送单个事件。"""
+        encoded_bucket_id = parse.quote(bucket_id, safe="")
+        endpoint = f"/buckets/{encoded_bucket_id}/events"
+        self._request_json("POST", endpoint, event)
 
-        payload = {
-            "timeperiods": timeperiods,
-            "query": query_strings,
-        }
-        return self._request_json("POST", endpoint, payload)
+    def post_events(self, bucket_id: str, events: list[dict[str, object]]) -> None:
+        """向指定 bucket 批量发送事件。"""
+        encoded_bucket_id = parse.quote(bucket_id, safe="")
+        endpoint = f"/buckets/{encoded_bucket_id}/events"
+        self._request_json("POST", endpoint, events)
 
     def _request_json(self, method: str, endpoint: str, payload: object | None = None) -> object:
         """统一封装 HTTP 请求与 JSON 解析。"""
@@ -103,7 +98,10 @@ class ActivityWatchRestClient:
         )
 
         with request.urlopen(http_request, timeout=self.timeout_seconds) as response:
-            return json.loads(response.read().decode("utf-8"))
+            response_text = response.read().decode("utf-8")
+            if not response_text.strip():
+                return None
+            return json.loads(response_text)
 
     def _parse_bucket(self, bucket_id: str, payload: dict[str, object]) -> BucketDescriptor:
         """把原始 bucket JSON 映射为强类型模型。"""
