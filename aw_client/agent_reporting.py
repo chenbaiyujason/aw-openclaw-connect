@@ -8,6 +8,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -20,6 +21,8 @@ from aw_client.models import EventInterval, QueryResult
 
 MAX_GEMINI_CONCURRENCY = 10
 GEMINI_MODEL = "gemini-3-flash-preview"
+GEMINI_MAX_ATTEMPTS = 3
+GEMINI_RETRY_DELAY_SECONDS = 1.0
 AGENT_CACHE_SCHEMA_VERSION = 2
 AGENT_CACHE_PATH = Path("logs") / "agent_prompt_cache.json"
 AGENT_EVENT_NAME = "before_submit_prompt"
@@ -118,6 +121,8 @@ class GeminiGenerationResult:
     title_prompt_hash: str | None
     title_source_event_id: str | None
     work_label: str
+    cache_summary: bool
+    cache_title: bool
 
 
 def build_agent_export_overrides(query_result: QueryResult) -> dict[str, AgentExportOverride]:
@@ -237,21 +242,29 @@ def _load_global_first_prompt_events(
     if not target_conversation_ids:
         return {}
 
-    from aw_client.query_service import QueryService
+    try:
+        from aw_client.query_service import QueryService
 
-    query_service = QueryService()
-    earliest_start = _discover_earliest_agent_start(query_service)
-    full_result = query_service.query_events(
-        start=earliest_start,
-        end=end,
-        watchers=["agent"],
-        apply_afk_cleanup=False,
-    )
-    full_context_events = [event for event in full_result.cleaned_events if event.watcher_family == "vscode"]
-    full_prompt_events = _extract_agent_prompt_events(
-        cleaned_events=full_result.cleaned_events,
-        context_events=full_context_events,
-    )
+        query_service = QueryService()
+        earliest_start = _discover_earliest_agent_start(query_service)
+        full_result = query_service.query_events(
+            start=earliest_start,
+            end=end,
+            watchers=["agent"],
+            apply_afk_cleanup=False,
+        )
+        full_context_events = [event for event in full_result.cleaned_events if event.watcher_family == "vscode"]
+        full_prompt_events = _extract_agent_prompt_events(
+            cleaned_events=full_result.cleaned_events,
+            context_events=full_context_events,
+        )
+    except Exception as error:
+        # 查全历史首条失败时，退回当前窗口内首条消息，不阻断本次导出。
+        print(
+            f"警告: 读取全历史首条 agent 消息失败，已退回当前导出窗口首条。原因: {error}",
+            file=sys.stderr,
+        )
+        return {}
 
     first_prompt_by_conversation: dict[str, AgentPromptEvent] = {}
     for prompt_event in full_prompt_events:
@@ -340,11 +353,15 @@ def _resolve_csv_rows(
                 "event_id": generation_result.event_id,
                 "conversation_id": generation_result.conversation_id,
                 "user_prompt": generation_result.user_prompt,
-                "summary_prompt_hash": generation_result.summary_prompt_hash,
                 "work": generation_result.work_label,
                 "updated_at": datetime.utcnow().isoformat() + "Z",
             }
-            if generation_result.title is not None:
+            # 只有成功生成的 summary 才写 freshness hash，失败回退的条目下次仍会再尝试。
+            if generation_result.cache_summary:
+                updated_entry["summary_prompt_hash"] = generation_result.summary_prompt_hash
+            else:
+                updated_entry.pop("summary_prompt_hash", None)
+            if generation_result.title is not None and generation_result.cache_title:
                 title_cache_key = generation_result.title_source_event_id or generation_result.event_id
                 title_entry = dict(cache_entries.get(title_cache_key, {}))
                 title_entry["event_id"] = title_cache_key
@@ -353,8 +370,20 @@ def _resolve_csv_rows(
                 title_entry["title_prompt_hash"] = generation_result.title_prompt_hash or ""
                 title_entry["updated_at"] = datetime.utcnow().isoformat() + "Z"
                 cache_entries[title_cache_key] = title_entry
-            if generation_result.title_prompt_hash is not None:
+            # 首消息标题生成失败时清掉旧标题，避免当前导出误用陈旧 title。
+            elif generation_result.title_source_event_id is not None:
+                title_cache_key = generation_result.title_source_event_id
+                title_entry = dict(cache_entries.get(title_cache_key, {}))
+                title_entry["event_id"] = title_cache_key
+                title_entry["conversation_id"] = generation_result.conversation_id
+                title_entry.pop("title", None)
+                title_entry.pop("title_prompt_hash", None)
+                title_entry["updated_at"] = datetime.utcnow().isoformat() + "Z"
+                cache_entries[title_cache_key] = title_entry
+            if generation_result.title_prompt_hash is not None and generation_result.cache_title:
                 updated_entry["title_prompt_hash"] = generation_result.title_prompt_hash
+            else:
+                updated_entry.pop("title_prompt_hash", None)
             cache_entries[generation_result.event_id] = updated_entry
 
     for conversation in conversations:
@@ -403,19 +432,41 @@ async def _generate_single_metadata(
 
 def _run_single_gemini_request(request: GeminiGenerationRequest) -> GeminiGenerationResult:
     """在线程中执行一次阻塞 Gemini REST 调用。"""
-    prompt_text = _build_gemini_prompt(request)
-    response_text = _run_gemini_rest_request(prompt_text, request.needs_title)
-    title_value, user_prompt_value = _parse_gemini_json(response_text, expect_title=request.needs_title)
-    return GeminiGenerationResult(
-        event_id=request.prompt_event.event_id,
-        conversation_id=request.conversation.conversation_id,
-        user_prompt=user_prompt_value,
-        summary_prompt_hash=request.summary_prompt_hash,
-        title=title_value,
-        title_prompt_hash=request.title_prompt_hash,
-        title_source_event_id=request.conversation.title_source_event_id if request.needs_title else None,
-        work_label=request.work_label,
-    )
+    try:
+        prompt_text = _build_gemini_prompt(request)
+        response_text = _run_gemini_rest_request(prompt_text, request.needs_title)
+        title_value, user_prompt_value = _parse_gemini_json(response_text, expect_title=request.needs_title)
+        return GeminiGenerationResult(
+            event_id=request.prompt_event.event_id,
+            conversation_id=request.conversation.conversation_id,
+            user_prompt=user_prompt_value,
+            summary_prompt_hash=request.summary_prompt_hash,
+            title=title_value,
+            title_prompt_hash=request.title_prompt_hash,
+            title_source_event_id=request.conversation.title_source_event_id if request.needs_title else None,
+            work_label=request.work_label,
+            cache_summary=True,
+            cache_title=request.needs_title,
+        )
+    except Exception as error:
+        fallback_user_prompt = _trim_text(request.prompt_event.cleaned_body, max_length=100) or "未生成总结"
+        # 单条 Gemini 失败时回退到原始清洗内容，避免整批 export 被一条网络抖动拖垮。
+        print(
+            f"警告: Gemini 单条生成失败，已回退到原始内容。event_id={request.prompt_event.event_id} 原因: {error}",
+            file=sys.stderr,
+        )
+        return GeminiGenerationResult(
+            event_id=request.prompt_event.event_id,
+            conversation_id=request.conversation.conversation_id,
+            user_prompt=fallback_user_prompt,
+            summary_prompt_hash=request.summary_prompt_hash,
+            title=None,
+            title_prompt_hash=request.title_prompt_hash,
+            title_source_event_id=request.conversation.title_source_event_id if request.needs_title else None,
+            work_label=request.work_label,
+            cache_summary=False,
+            cache_title=False,
+        )
 
 
 def _run_gemini_rest_request(prompt_text: str, needs_title: bool) -> str:
@@ -447,14 +498,24 @@ def _run_gemini_rest_request(prompt_text: str, needs_title: bool) -> str:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(http_request, timeout=90) as response:
-            response_text = response.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as exc:
-        error_body = exc.read().decode("utf-8", errors="replace")
-        raise ValueError(f"Gemini REST 调用失败: status={exc.code} body={error_body or 'empty'}") from exc
-    except urllib.error.URLError as exc:
-        raise ValueError(f"Gemini REST 调用失败: {exc.reason}") from exc
+    for attempt_index in range(GEMINI_MAX_ATTEMPTS):
+        try:
+            with urllib.request.urlopen(http_request, timeout=90) as response:
+                response_text = response.read().decode("utf-8", errors="replace")
+            break
+        except urllib.error.HTTPError as exc:
+            error_body = exc.read().decode("utf-8", errors="replace")
+            if attempt_index + 1 < GEMINI_MAX_ATTEMPTS and _should_retry_gemini_http_error(exc.code):
+                # 按固定 1 秒间隔重试，避免指数退避把单次导出拖太久。
+                time.sleep(GEMINI_RETRY_DELAY_SECONDS)
+                continue
+            raise ValueError(f"Gemini REST 调用失败: status={exc.code} body={error_body or 'empty'}") from exc
+        except urllib.error.URLError as exc:
+            if attempt_index + 1 < GEMINI_MAX_ATTEMPTS:
+                # 网络/TLS 抖动统一固定等待 1 秒后重试。
+                time.sleep(GEMINI_RETRY_DELAY_SECONDS)
+                continue
+            raise ValueError(f"Gemini REST 调用失败: {exc.reason}") from exc
 
     response_payload = json.loads(response_text)
     error_payload = response_payload.get("error")
@@ -574,6 +635,11 @@ def _parse_model_response_json(response_text: str) -> dict[str, object]:
     return parsed_payload
 
 
+def _should_retry_gemini_http_error(status_code: int) -> bool:
+    """只对限流和服务端错误做固定间隔重试。"""
+    return status_code == 429 or 500 <= status_code < 600
+
+
 def _load_agent_cache() -> AgentCachePayload:
     """读取本地缓存；不存在时返回空结构。"""
     if not AGENT_CACHE_PATH.exists():
@@ -604,11 +670,15 @@ def _load_agent_cache() -> AgentCachePayload:
 
 def _write_agent_cache(cache_payload: AgentCachePayload) -> None:
     """把缓存稳定写回本地。"""
-    AGENT_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    AGENT_CACHE_PATH.write_text(
-        json.dumps(cache_payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    try:
+        AGENT_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        AGENT_CACHE_PATH.write_text(
+            json.dumps(cache_payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except (OSError, TypeError, ValueError) as error:
+        # 缓存写盘失败只影响复用，不应影响本次导出结果。
+        print(f"警告: agent 缓存写入失败，已跳过缓存落盘。原因: {error}", file=sys.stderr)
 
 
 def _clean_prompt_body(raw_text: str) -> str:
