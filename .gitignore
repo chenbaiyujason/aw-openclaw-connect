@@ -9,3 +9,5 @@ __pycache__/
 # macOS Finder 生成文件：与项目逻辑无关
 .DS_Store
 *.code-workspace
+logs/agent_prompt_cache.json
+scripts/debug_commits.py
